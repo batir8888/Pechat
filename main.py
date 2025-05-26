@@ -1,11 +1,12 @@
 import tkinter as tk
 from tkinter import ttk, scrolledtext, messagebox
-import pyautogui
+from pynput.keyboard import Controller, Key
 import random
 import time
 import threading
 import re
 import unicodedata
+import pyperclip
 
 
 class TypingSimulator:
@@ -13,6 +14,9 @@ class TypingSimulator:
         self.root = root
         self.root.title("Симулятор человеческой печати")
         self.root.geometry("900x700")
+
+        # Контроллер клавиатуры
+        self.keyboard = Controller()
 
         # Флаг для остановки печати
         self.stop_typing = False
@@ -50,6 +54,35 @@ class TypingSimulator:
         }
 
         self.setup_ui()
+        self.bind_shortcuts()
+
+    def bind_shortcuts(self):
+        """Привязка горячих клавиш"""
+        # Ctrl+V для вставки
+        self.root.bind('<Control-v>', self.paste_text)
+        # Альтернативный способ для перехвата Ctrl+V на любой раскладке
+        self.root.bind('<Control-KeyPress>', self.check_paste_shortcut)
+
+    def check_paste_shortcut(self, event):
+        """Проверка нажатия Ctrl+V на любой раскладке"""
+        # Код клавиши V - 86, код русской М - тоже 86
+        if event.keycode == 86:
+            return self.paste_text(event)
+
+    def paste_text(self, event=None):
+        """Обработка вставки текста"""
+        try:
+            # Получаем текст из буфера обмена
+            clipboard_text = pyperclip.paste()
+            if clipboard_text:
+                # Определяем позицию курсора
+                cursor_pos = self.text_area.index(tk.INSERT)
+                # Вставляем текст
+                self.text_area.insert(cursor_pos, clipboard_text)
+                self.status_var.set("Текст вставлен из буфера обмена")
+        except Exception as e:
+            self.status_var.set(f"Ошибка при вставке: {str(e)}")
+        return "break"  # Предотвращаем стандартную обработку
 
     def setup_ui(self):
         # Главный контейнер
@@ -62,10 +95,14 @@ class TypingSimulator:
         main_frame.columnconfigure(0, weight=1)
         main_frame.rowconfigure(1, weight=1)
 
-        # Заголовок
-        title_label = ttk.Label(main_frame, text="Вставьте текст для печати:",
-                                font=('Arial', 12, 'bold'))
-        title_label.grid(row=0, column=0, sticky=tk.W, pady=(0, 5))
+        # Заголовок с подсказкой
+        title_frame = ttk.Frame(main_frame)
+        title_frame.grid(row=0, column=0, sticky=tk.W, pady=(0, 5))
+
+        ttk.Label(title_frame, text="Вставьте текст для печати:",
+                  font=('Arial', 12, 'bold')).pack(side=tk.LEFT)
+        ttk.Label(title_frame, text="(Ctrl+V работает на любой раскладке)",
+                  font=('Arial', 9), foreground='gray').pack(side=tk.LEFT, padx=(10, 0))
 
         # Текстовое поле с прокруткой
         self.text_area = scrolledtext.ScrolledText(main_frame, wrap=tk.WORD,
@@ -88,11 +125,25 @@ class TypingSimulator:
                         value="normal").grid(row=0, column=1, padx=5)
         ttk.Radiobutton(mode_frame, text="C++ код (автоформатирование)",
                         variable=self.mode_var, value="cpp").grid(row=0, column=2, padx=5)
+        ttk.Radiobutton(mode_frame, text="С паузами (5 сек на новой строке)",
+                        variable=self.mode_var, value="delayed").grid(row=0, column=3, padx=5)
+
+        # Метод печати
+        method_frame = ttk.Frame(settings_frame)
+        method_frame.grid(row=1, column=0, sticky=(tk.W, tk.E), pady=5)
+
+        ttk.Label(method_frame, text="Метод печати:").grid(row=0, column=0, sticky=tk.W, padx=(0, 10))
+
+        self.typing_method = tk.StringVar(value="unicode")
+        ttk.Radiobutton(method_frame, text="Unicode (поддержка всех языков)",
+                        variable=self.typing_method, value="unicode").grid(row=0, column=1, padx=5)
+        ttk.Radiobutton(method_frame, text="Через буфер обмена (для сложных символов)",
+                        variable=self.typing_method, value="clipboard").grid(row=0, column=2, padx=5)
 
         # Опции форматирования
         format_frame = ttk.LabelFrame(settings_frame, text="Опции форматирования",
                                       padding="5")
-        format_frame.grid(row=1, column=0, sticky=(tk.W, tk.E), pady=5)
+        format_frame.grid(row=2, column=0, sticky=(tk.W, tk.E), pady=5)
 
         self.convert_spaces = tk.BooleanVar(value=True)
         ttk.Checkbutton(format_frame, text="Конвертировать 4 пробела в табуляцию",
@@ -112,7 +163,7 @@ class TypingSimulator:
 
         # Настройки скорости
         speed_frame = ttk.Frame(settings_frame)
-        speed_frame.grid(row=2, column=0, sticky=(tk.W, tk.E), pady=5)
+        speed_frame.grid(row=3, column=0, sticky=(tk.W, tk.E), pady=5)
 
         ttk.Label(speed_frame, text="Скорость печати:").grid(row=0, column=0, sticky=tk.W)
 
@@ -130,12 +181,18 @@ class TypingSimulator:
 
         # Задержка перед началом
         delay_frame = ttk.Frame(settings_frame)
-        delay_frame.grid(row=3, column=0, sticky=tk.W, pady=5)
+        delay_frame.grid(row=4, column=0, sticky=tk.W, pady=5)
 
         ttk.Label(delay_frame, text="Задержка перед началом (сек):").grid(row=0, column=0)
         self.start_delay = tk.IntVar(value=3)
         ttk.Spinbox(delay_frame, from_=1, to=10, textvariable=self.start_delay,
                     width=10).grid(row=0, column=1, padx=10)
+
+        # Задержка между строками (для режима с паузами)
+        ttk.Label(delay_frame, text="Задержка между строками (сек):").grid(row=1, column=0, pady=(5, 0))
+        self.line_delay = tk.IntVar(value=5)
+        ttk.Spinbox(delay_frame, from_=1, to=30, textvariable=self.line_delay,
+                    width=10).grid(row=1, column=1, padx=10, pady=(5, 0))
 
         # Фрейм для кнопок
         button_frame = ttk.Frame(main_frame)
@@ -212,7 +269,6 @@ class TypingSimulator:
             return text
 
         # Удаляем переносы внутри строковых литералов (часто бывает в PDF)
-        # Это упрощенная версия, для более сложных случаев нужен полный парсер
         lines = text.split('\n')
         fixed_lines = []
         in_string = False
@@ -295,30 +351,100 @@ class TypingSimulator:
         self.text_area.insert(1.0, formatted_text)
         self.status_var.set("Текст отформатирован")
 
-    def simulate_human_typing(self, text):
-        """Имитирует человеческую печать с вариациями скорости"""
+    def type_with_clipboard(self, text):
+        """Печатает текст используя буфер обмена для каждого символа"""
         for char in text:
             if self.stop_typing:
                 break
 
-            # Печатаем символ
-            pyautogui.write(char)
+            # Сохраняем текущее содержимое буфера
+            old_clipboard = pyperclip.paste()
 
-            # Рассчитываем задержку с учетом множителя скорости
-            speed_multiplier = self.speed_var.get()
-            base_delay = random.uniform(self.min_delay, self.max_delay)
-            delay = base_delay / speed_multiplier
+            # Копируем символ в буфер
+            pyperclip.copy(char)
 
-            # Добавляем случайные паузы после слов
-            if char == ' ' and random.random() < self.word_pause_chance:
-                pause_min, pause_max = self.word_pause_duration
-                delay += random.uniform(pause_min, pause_max) / speed_multiplier
+            # Вставляем
+            self.keyboard.press(Key.ctrl)
+            self.keyboard.press('v')
+            self.keyboard.release('v')
+            self.keyboard.release(Key.ctrl)
 
-            # Небольшая дополнительная задержка после знаков препинания
-            if char in '.!?,:;':
-                delay += random.uniform(0.1, 0.3) / speed_multiplier
+            # Восстанавливаем буфер
+            pyperclip.copy(old_clipboard)
 
-            time.sleep(delay)
+            # Задержка
+            self.add_typing_delay(char)
+
+    def type_unicode(self, text):
+        """Печатает текст напрямую с поддержкой Unicode"""
+        for char in text:
+            if self.stop_typing:
+                break
+
+            # Используем type для поддержки Unicode
+            self.keyboard.type(char)
+
+            # Задержка
+            self.add_typing_delay(char)
+
+    def add_typing_delay(self, char):
+        """Добавляет человеческую задержку между символами"""
+        # Рассчитываем задержку с учетом множителя скорости
+        speed_multiplier = self.speed_var.get()
+        base_delay = random.uniform(self.min_delay, self.max_delay)
+        delay = base_delay / speed_multiplier
+
+        # Добавляем случайные паузы после слов
+        if char == ' ' and random.random() < self.word_pause_chance:
+            pause_min, pause_max = self.word_pause_duration
+            delay += random.uniform(pause_min, pause_max) / speed_multiplier
+
+        # Небольшая дополнительная задержка после знаков препинания
+        if char in '.!?,:;':
+            delay += random.uniform(0.1, 0.3) / speed_multiplier
+
+        time.sleep(delay)
+
+    def simulate_human_typing(self, text):
+        """Имитирует человеческую печать с выбранным методом"""
+        if self.mode_var.get() == "delayed":
+            # Режим с паузами между строками
+            self.type_with_line_delays(text)
+        elif self.typing_method.get() == "clipboard":
+            self.type_with_clipboard(text)
+        else:
+            self.type_unicode(text)
+
+    def type_with_line_delays(self, text):
+        """Печатает текст с паузами между строками"""
+        lines = text.split('\n')
+
+        for i, line in enumerate(lines):
+            if self.stop_typing:
+                break
+
+            # Печатаем строку
+            if self.typing_method.get() == "clipboard":
+                self.type_with_clipboard(line)
+            else:
+                self.type_unicode(line)
+
+            # Если это не последняя строка, добавляем перенос и паузу
+            if i < len(lines) - 1:
+                # Печатаем перенос строки
+                self.keyboard.press(Key.enter)
+                self.keyboard.release(Key.enter)
+
+                # Пауза между строками с обратным отсчётом
+                delay_seconds = self.line_delay.get()
+                for countdown in range(delay_seconds, 0, -1):
+                    if self.stop_typing:
+                        break
+                    self.status_var.set(f"Пауза между строками: {countdown} сек...")
+                    time.sleep(1)
+
+                if not self.stop_typing:
+                    self.status_var.set("Печатаем...")
 
     def typing_worker(self):
         """Рабочая функция для потока печати"""
@@ -333,7 +459,10 @@ class TypingSimulator:
             # Форматируем текст если нужно
             if self.mode_var.get() == "cpp":
                 text = self.format_cpp_code(text)
-            elif self.convert_spaces.get():
+            elif self.mode_var.get() == "normal" and self.convert_spaces.get():
+                text = re.sub(r'    ', '\t', text)
+            # В режиме delayed форматирование применяется только если включено
+            elif self.mode_var.get() == "delayed" and self.convert_spaces.get():
                 text = re.sub(r'    ', '\t', text)
 
             # Обновляем статус
@@ -394,10 +523,6 @@ class TypingSimulator:
 
 
 def main():
-    # Настройки PyAutoGUI для безопасности
-    pyautogui.FAILSAFE = True  # Перемещение мыши в угол экрана остановит программу
-    pyautogui.PAUSE = 0.01  # Минимальная пауза между командами
-
     root = tk.Tk()
     app = TypingSimulator(root)
 
