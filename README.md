@@ -1,3 +1,3 @@
 Requirements:
 
-pip install pyautogui
+pip install -r requirements.txt
